@@ -20,9 +20,18 @@
     { claim-id: uint }
     { livestock-id: uint, description: (string-ascii 50), amount: uint, status: (string-ascii 10) })
 
+(define-map livestock-reputation
+    { livestock-id: uint }
+    { score: uint, health-events: uint, breeding-success: uint, productivity-rating: uint })
+
+(define-map reputation-events
+    { event-id: uint }
+    { livestock-id: uint, event-type: (string-ascii 20), impact: int, reporter: principal })
+
 (define-data-var next-livestock-id uint u1)
 (define-data-var next-pool-id uint u1)
 (define-data-var next-claim-id uint u1)
+(define-data-var next-event-id uint u1)
 
 ;; Core Functions
 (define-public (register-livestock (species (string-ascii 20)) (age uint))
@@ -32,6 +41,10 @@
             { owner: tx-sender, species: species, age: age, health-status: "healthy" }
         )
         (var-set next-livestock-id (+ livestock-id u1))
+        (map-insert livestock-reputation
+            { livestock-id: livestock-id }
+            { score: u100, health-events: u0, breeding-success: u0, productivity-rating: u50 }
+        )
         (try! (mint-cowcoin livestock-id))
         (ok livestock-id)))
 (define-public (transfer-livestock (livestock-id uint) (new-owner principal))
@@ -75,6 +88,37 @@
         (var-set next-claim-id (+ claim-id u1))
         (ok claim-id)))
 
+(define-public (record-reputation-event (livestock-id uint) (event-type (string-ascii 20)) (impact int))
+    (let ((event-id (var-get next-event-id))
+          (reputation (unwrap! (map-get? livestock-reputation { livestock-id: livestock-id }) err-not-found)))
+        (asserts! (is-livestock-owner livestock-id) err-owner-only)
+        (map-insert reputation-events
+            { event-id: event-id }
+            { livestock-id: livestock-id, event-type: event-type, impact: impact, reporter: tx-sender }
+        )
+        (var-set next-event-id (+ event-id u1))
+        (try! (update-reputation-score livestock-id impact))
+        (ok event-id)))
+
+(define-public (update-breeding-success (livestock-id uint) (success-count uint))
+    (let ((reputation (unwrap! (map-get? livestock-reputation { livestock-id: livestock-id }) err-not-found)))
+        (asserts! (is-livestock-owner livestock-id) err-owner-only)
+        (map-set livestock-reputation
+            { livestock-id: livestock-id }
+            (merge reputation { breeding-success: success-count })
+        )
+        (ok true)))
+
+(define-public (update-productivity-rating (livestock-id uint) (rating uint))
+    (let ((reputation (unwrap! (map-get? livestock-reputation { livestock-id: livestock-id }) err-not-found)))
+        (asserts! (is-livestock-owner livestock-id) err-owner-only)
+        (asserts! (<= rating u100) (err u104))
+        (map-set livestock-reputation
+            { livestock-id: livestock-id }
+            (merge reputation { productivity-rating: rating })
+        )
+        (ok true)))
+
 ;; Helper Functions
 (define-private (mint-cowcoin (livestock-id uint))
     (ft-mint? cowcoin u100 tx-sender))
@@ -89,10 +133,32 @@
     (let ((livestock (unwrap! (map-get? livestock-registry { id: livestock-id }) false)))
         (is-eq tx-sender (get owner livestock))))
 
+(define-private (update-reputation-score (livestock-id uint) (impact int))
+    (let ((reputation (unwrap! (map-get? livestock-reputation { livestock-id: livestock-id }) err-not-found))
+          (current-score (get score reputation))
+          (new-score (if (> impact 0)
+                         (+ current-score (to-uint impact))
+                         (if (> current-score (to-uint (- 0 impact)))
+                             (- current-score (to-uint (- 0 impact)))
+                             u0))))
+        (map-set livestock-reputation
+            { livestock-id: livestock-id }
+            (merge reputation { 
+                score: new-score,
+                health-events: (+ (get health-events reputation) u1)
+            })
+        )
+        (ok true)))
+
 (define-read-only (get-livestock-info (livestock-id uint))
     (ok (unwrap! (map-get? livestock-registry { id: livestock-id }) err-not-found)))
 (define-read-only (get-pool-info (pool-id uint))
     (ok (unwrap! (map-get? insurance-pools { pool-id: pool-id }) err-not-found)))
 (define-read-only (get-claim-info (claim-id uint))
-
     (ok (unwrap! (map-get? vet-claims { claim-id: claim-id }) err-not-found)))
+
+(define-read-only (get-reputation-info (livestock-id uint))
+    (ok (unwrap! (map-get? livestock-reputation { livestock-id: livestock-id }) err-not-found)))
+
+(define-read-only (get-reputation-event (event-id uint))
+    (ok (unwrap! (map-get? reputation-events { event-id: event-id }) err-not-found)))
