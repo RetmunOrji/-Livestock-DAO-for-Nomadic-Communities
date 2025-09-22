@@ -78,6 +78,37 @@ The MVP provides the basic infrastructure needed for nomadic communities to:
 1. Register and transfer livestock ownership
 2. Participate in decentralized insurance pools
 3. Submit and track veterinary claims
-
 All core functions have been tested and are ready for review.
+
+## 🆕 New Features
+
+### Livestock Auction System
+- 🛒 Decentralized auction mechanism for transparent livestock trading
+- ⏱️ Time-based auctions with block height expiration
+- 💰 CowCoin integration for bidding and settlement
+- 🔒 Secure ownership transfers upon auction completion
+
+### Contract Functions (Continued)
+
+6. Start Auction
+```clarity
+(contract-call? .livestock-dao start-auction u1 u100 u144)
+```
+
+7. Place Bid
+```clarity
+(contract-call? .livestock-dao place-bid u1 u150)
+```
+
+8. End Auction
+```clarity
+(contract-call? .livestock-dao end-auction u1)
+```
+
+### Usage (Continued)
+
+6. Start auctions for livestock trading
+7. Participate in bids to acquire assets
+8. Conclude auctions to finalize trades
+
 

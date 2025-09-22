@@ -3,6 +3,10 @@
 (define-constant err-not-found (err u101))
 (define-constant err-already-registered (err u102))
 (define-constant err-insufficient-funds (err u103))
+(define-constant err-auction-not-found (err u105))
+(define-constant err-auction-ended (err u106))
+(define-constant err-bid-too-low (err u107))
+(define-constant err-not-seller (err u108))
 
 ;; CowCoin Token
 (define-fungible-token cowcoin)
@@ -28,10 +32,15 @@
     { event-id: uint }
     { livestock-id: uint, event-type: (string-ascii 20), impact: int, reporter: principal })
 
+(define-map livestock-auctions
+    { auction-id: uint }
+    { livestock-id: uint, seller: principal, start-price: uint, current-bid: uint, bidder: (optional principal), end-block: uint })
+
 (define-data-var next-livestock-id uint u1)
 (define-data-var next-pool-id uint u1)
 (define-data-var next-claim-id uint u1)
 (define-data-var next-event-id uint u1)
+(define-data-var next-auction-id uint u1)
 
 ;; Core Functions
 (define-public (register-livestock (species (string-ascii 20)) (age uint))
@@ -119,6 +128,36 @@
         )
         (ok true)))
 
+(define-public (start-auction (livestock-id uint) (start-price uint) (duration-blocks uint))
+    (let ((auction-id (var-get next-auction-id)))
+        (asserts! (is-livestock-owner livestock-id) err-owner-only)
+        (map-insert livestock-auctions
+            { auction-id: auction-id }
+            { livestock-id: livestock-id, seller: tx-sender, start-price: start-price, current-bid: start-price, bidder: none, end-block: (+ stacks-block-height duration-blocks) }
+        )
+        (var-set next-auction-id (+ auction-id u1))
+        (ok auction-id)))
+
+(define-public (place-bid (auction-id uint) (bid-amount uint))
+    (let ((auction (unwrap! (map-get? livestock-auctions { auction-id: auction-id }) err-auction-not-found)))
+        (asserts! (< stacks-block-height (get end-block auction)) err-auction-ended)
+        (asserts! (> bid-amount (get current-bid auction)) err-bid-too-low)
+        (map-set livestock-auctions
+            { auction-id: auction-id }
+            (merge auction { current-bid: bid-amount, bidder: (some tx-sender) })
+        )
+        (ok true)))
+
+(define-public (end-auction (auction-id uint))
+    (let ((auction (unwrap! (map-get? livestock-auctions { auction-id: auction-id }) err-auction-not-found))
+          (bidder (unwrap! (get bidder auction) err-auction-not-found)))
+        (asserts! (>= stacks-block-height (get end-block auction)) err-auction-ended)
+        (asserts! (is-eq tx-sender (get seller auction)) err-not-seller)
+        (try! (transfer-livestock (get livestock-id auction) bidder))
+        (try! (ft-transfer? cowcoin (get current-bid auction) bidder (get seller auction)))
+        (map-delete livestock-auctions { auction-id: auction-id })
+        (ok true)))
+
 ;; Helper Functions
 (define-private (mint-cowcoin (livestock-id uint))
     (ft-mint? cowcoin u100 tx-sender))
@@ -162,3 +201,6 @@
 
 (define-read-only (get-reputation-event (event-id uint))
     (ok (unwrap! (map-get? reputation-events { event-id: event-id }) err-not-found)))
+
+(define-read-only (get-auction-info (auction-id uint))
+    (ok (unwrap! (map-get? livestock-auctions { auction-id: auction-id }) err-auction-not-found)))
