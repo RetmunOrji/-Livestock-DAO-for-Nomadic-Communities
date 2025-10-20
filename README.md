@@ -111,4 +111,29 @@ All core functions have been tested and are ready for review.
 7. Participate in bids to acquire assets
 8. Conclude auctions to finalize trades
 
+## 🆕 New Features
+
+### Livestock Rental System
+- 🏠 Decentralized rental mechanism for temporary livestock access
+- ⏰ Time-based rentals with block height expiration
+- 💰 CowCoin integration for rental payments and settlements
+- 🔄 Flexible rental periods for nomadic community needs
+
+### Contract Functions (Continued)
+
+9. Rent Livestock
+```clarity
+(contract-call? .livestock-dao rent-livestock u1 u10 u144)
+```
+
+10. End Rental
+```clarity
+(contract-call? .livestock-dao end-rental u1)
+```
+
+### Usage (Continued)
+
+9. Rent livestock for temporary use
+10. Conclude rentals upon expiration
+
 

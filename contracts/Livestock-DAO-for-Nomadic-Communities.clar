@@ -7,6 +7,9 @@
 (define-constant err-auction-ended (err u106))
 (define-constant err-bid-too-low (err u107))
 (define-constant err-not-seller (err u108))
+(define-constant err-already-rented (err u109))
+(define-constant err-not-renter (err u110))
+(define-constant err-rental-not-found (err u111))
 
 ;; CowCoin Token
 (define-fungible-token cowcoin)
@@ -36,11 +39,16 @@
     { auction-id: uint }
     { livestock-id: uint, seller: principal, start-price: uint, current-bid: uint, bidder: (optional principal), end-block: uint })
 
+(define-map livestock-rentals
+    { rental-id: uint }
+    { livestock-id: uint, renter: principal, daily-rate: uint, start-block: uint, end-block: uint, active: bool })
+
 (define-data-var next-livestock-id uint u1)
 (define-data-var next-pool-id uint u1)
 (define-data-var next-claim-id uint u1)
 (define-data-var next-event-id uint u1)
 (define-data-var next-auction-id uint u1)
+(define-data-var next-rental-id uint u1)
 
 ;; Core Functions
 (define-public (register-livestock (species (string-ascii 20)) (age uint))
@@ -158,6 +166,27 @@
         (map-delete livestock-auctions { auction-id: auction-id })
         (ok true)))
 
+(define-public (rent-livestock (livestock-id uint) (daily-rate uint) (rental-duration-blocks uint))
+   (let ((rental-id (var-get next-rental-id)))
+       (asserts! (is-livestock-owner livestock-id) err-owner-only)
+       (asserts! (not (is-livestock-rented livestock-id)) err-already-rented)
+       (map-insert livestock-rentals
+           { rental-id: rental-id }
+           { livestock-id: livestock-id, renter: tx-sender, daily-rate: daily-rate, start-block: stacks-block-height, end-block: (+ stacks-block-height rental-duration-blocks), active: true }
+       )
+       (var-set next-rental-id (+ rental-id u1))
+       (ok rental-id)))
+
+(define-public (end-rental (rental-id uint))
+   (let ((rental (unwrap! (map-get? livestock-rentals { rental-id: rental-id }) err-rental-not-found)))
+       (asserts! (is-eq tx-sender (get renter rental)) err-not-renter)
+       (asserts! (>= stacks-block-height (get end-block rental)) err-auction-ended)
+       (map-set livestock-rentals
+           { rental-id: rental-id }
+           (merge rental { active: false })
+       )
+       (ok true)))
+
 ;; Helper Functions
 (define-private (mint-cowcoin (livestock-id uint))
     (ft-mint? cowcoin u100 tx-sender))
@@ -171,6 +200,10 @@
 (define-private (is-livestock-owner (livestock-id uint))
     (let ((livestock (unwrap! (map-get? livestock-registry { id: livestock-id }) false)))
         (is-eq tx-sender (get owner livestock))))
+
+(define-private (is-livestock-rented (livestock-id uint))
+    (let ((rental-id (var-get next-rental-id)))
+        (is-some (map-get? livestock-rentals { rental-id: rental-id }))))
 
 (define-private (update-reputation-score (livestock-id uint) (impact int))
     (let ((reputation (unwrap! (map-get? livestock-reputation { livestock-id: livestock-id }) err-not-found))
@@ -204,3 +237,6 @@
 
 (define-read-only (get-auction-info (auction-id uint))
     (ok (unwrap! (map-get? livestock-auctions { auction-id: auction-id }) err-auction-not-found)))
+
+(define-read-only (get-rental-info (rental-id uint))
+    (ok (unwrap! (map-get? livestock-rentals { rental-id: rental-id }) err-rental-not-found)))
