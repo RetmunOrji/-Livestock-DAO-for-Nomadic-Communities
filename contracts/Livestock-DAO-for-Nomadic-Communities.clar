@@ -10,6 +10,13 @@
 (define-constant err-already-rented (err u109))
 (define-constant err-not-renter (err u110))
 (define-constant err-rental-not-found (err u111))
+(define-constant err-loan-not-found (err u112))
+(define-constant err-insufficient-reputation (err u113))
+(define-constant err-loan-active (err u114))
+(define-constant err-not-borrower (err u115))
+(define-constant loan-multiplier u10)
+(define-constant loan-duration-blocks u1440)
+(define-constant loan-interest-rate u5)
 
 ;; CowCoin Token
 (define-fungible-token cowcoin)
@@ -40,8 +47,12 @@
     { livestock-id: uint, seller: principal, start-price: uint, current-bid: uint, bidder: (optional principal), end-block: uint })
 
 (define-map livestock-rentals
-    { rental-id: uint }
-    { livestock-id: uint, renter: principal, daily-rate: uint, start-block: uint, end-block: uint, active: bool })
+     { rental-id: uint }
+     { livestock-id: uint, renter: principal, daily-rate: uint, start-block: uint, end-block: uint, active: bool })
+
+(define-map livestock-loans
+     { loan-id: uint }
+     { livestock-id: uint, borrower: principal, loan-amount: uint, interest-rate: uint, start-block: uint, end-block: uint, active: bool })
 
 (define-data-var next-livestock-id uint u1)
 (define-data-var next-pool-id uint u1)
@@ -49,6 +60,7 @@
 (define-data-var next-event-id uint u1)
 (define-data-var next-auction-id uint u1)
 (define-data-var next-rental-id uint u1)
+(define-data-var next-loan-id uint u1)
 
 ;; Core Functions
 (define-public (register-livestock (species (string-ascii 20)) (age uint))
@@ -178,14 +190,39 @@
        (ok rental-id)))
 
 (define-public (end-rental (rental-id uint))
-   (let ((rental (unwrap! (map-get? livestock-rentals { rental-id: rental-id }) err-rental-not-found)))
-       (asserts! (is-eq tx-sender (get renter rental)) err-not-renter)
-       (asserts! (>= stacks-block-height (get end-block rental)) err-auction-ended)
-       (map-set livestock-rentals
-           { rental-id: rental-id }
-           (merge rental { active: false })
-       )
-       (ok true)))
+    (let ((rental (unwrap! (map-get? livestock-rentals { rental-id: rental-id }) err-rental-not-found)))
+        (asserts! (is-eq tx-sender (get renter rental)) err-not-renter)
+        (asserts! (>= stacks-block-height (get end-block rental)) err-auction-ended)
+        (map-set livestock-rentals
+            { rental-id: rental-id }
+            (merge rental { active: false })
+        )
+        (ok true)))
+
+(define-public (request-livestock-loan (livestock-id uint))
+    (let ((loan-id (var-get next-loan-id))
+          (reputation (unwrap! (map-get? livestock-reputation { livestock-id: livestock-id }) err-not-found)))
+        (asserts! (is-livestock-owner livestock-id) err-owner-only)
+        (asserts! (>= (get score reputation) u50) err-insufficient-reputation)
+        (asserts! (not (is-livestock-loaned livestock-id)) err-loan-active)
+        (map-insert livestock-loans
+            { loan-id: loan-id }
+            { livestock-id: livestock-id, borrower: tx-sender, loan-amount: (* (get score reputation) loan-multiplier), interest-rate: loan-interest-rate, start-block: stacks-block-height, end-block: (+ stacks-block-height loan-duration-blocks), active: true }
+        )
+        (var-set next-loan-id (+ loan-id u1))
+        (try! (mint-cowcoin (* (get score reputation) loan-multiplier)))
+        (ok loan-id)))
+
+(define-public (repay-livestock-loan (loan-id uint))
+    (let ((loan (unwrap! (map-get? livestock-loans { loan-id: loan-id }) err-loan-not-found))
+          (total-repayment (+ (get loan-amount loan) (/ (* (get loan-amount loan) (get interest-rate loan)) u100))))
+        (asserts! (is-eq tx-sender (get borrower loan)) err-not-borrower)
+        (try! (burn-cowcoin total-repayment))
+        (map-set livestock-loans
+            { loan-id: loan-id }
+            (merge loan { active: false })
+        )
+        (ok true)))
 
 ;; Helper Functions
 (define-private (mint-cowcoin (livestock-id uint))
@@ -204,6 +241,10 @@
 (define-private (is-livestock-rented (livestock-id uint))
     (let ((rental-id (var-get next-rental-id)))
         (is-some (map-get? livestock-rentals { rental-id: rental-id }))))
+
+(define-private (is-livestock-loaned (livestock-id uint))
+    (let ((loan-id (var-get next-loan-id)))
+        (is-some (map-get? livestock-loans { loan-id: loan-id }))))
 
 (define-private (update-reputation-score (livestock-id uint) (impact int))
     (let ((reputation (unwrap! (map-get? livestock-reputation { livestock-id: livestock-id }) err-not-found))
@@ -240,3 +281,6 @@
 
 (define-read-only (get-rental-info (rental-id uint))
     (ok (unwrap! (map-get? livestock-rentals { rental-id: rental-id }) err-rental-not-found)))
+
+(define-read-only (get-loan-info (loan-id uint))
+    (ok (unwrap! (map-get? livestock-loans { loan-id: loan-id }) err-loan-not-found)))

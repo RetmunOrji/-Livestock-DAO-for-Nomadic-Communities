@@ -136,4 +136,29 @@ All core functions have been tested and are ready for review.
 9. Rent livestock for temporary use
 10. Conclude rentals upon expiration
 
+## 🆕 New Features
+
+### Livestock Loan System
+- 💸 Reputation-based loan mechanism enabling livestock owners to access liquidity
+- 📊 Dynamic loan amounts calculated from livestock reputation scores
+- ⏳ Fixed-duration loans with interest for sustainable financial access
+- 🔄 Repayment system ensuring loan lifecycle management
+
+### Contract Functions (Continued)
+
+11. Request Livestock Loan
+```clarity
+(contract-call? .livestock-dao request-livestock-loan u1)
+```
+
+12. Repay Livestock Loan
+```clarity
+(contract-call? .livestock-dao repay-livestock-loan u1)
+```
+
+### Usage (Continued)
+
+11. Request loans based on livestock reputation
+12. Repay loans with interest upon maturity
+
 
